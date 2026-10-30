@@ -42,9 +42,9 @@ All commands are in the Command Palette under **Margin:**.
 |---|---|
 | **Mirror** | Claude reads the draft: labels for the units, the direction it sees, where the structure does not run, factual problems (with references), and two or three options for continuing. |
 | **Stock** | Inventory of material not (yet) in the draft: your marked notes and loose fragments, plus what Claude would add from the sources, each with where it could land. |
-| **Ask Claude…** | A question during writing, about the selection if there is one. Also in the right-click menu. |
+| **Ask Claude…** | A question or a general reaction ("the exegetical detail matters less here"), about the selection if there is one. The document is not sent along: Claude reads the saved file only if the question needs it, so a conversation stays light. A reaction makes Claude re-weigh the open items. Also in the right-click menu. |
 | **Show/hide sidebar** | A sheet next to the document with the direction, the structure (click to jump), the open checklist with ✓ / ✗, and Claude's last answer. While it is open, answers go there instead of the bottom panel. |
-| **React to the last round…** | A general reaction ("the exegetical detail matters less to me here"). Claude interprets it and re-weighs the open items: lower or higher weight, or closed with a reason. What you accepted or rejected is never changed. Items Claude closed appear under *Changed by Claude* in the sidebar until you mark them fine or reopen them. |
+| **Link a related file…** | Link, say, a sermon and its liturgies. Pick from the files near the document, newest first; the link shows in the sidebar of both files (newest first) and opens with a click. |
 | **Checklist** | All open items in line order. Pick one to jump there, then accept, reject (with reason), mark done, reopen, or apply a suggestion. |
 | **Outline / Go to unit** | Jump through sections, moves and labelled paragraphs. |
 | **Label this unit…** | Your own name for the unit at the cursor. Your labels always win over Claude's. |

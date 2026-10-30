@@ -44,6 +44,11 @@
 	// reactions show you do not want it; the legend switches it back on.
 	"skip_kinds": [],
 
+	// Linking related files (Margin: Link a related file…): which files are
+	// offered, and which open in Sublime (the rest open in their own program).
+	"link_extensions": [".tex", ".md", ".txt", ".docx", ".pdf"],
+	"link_open_in_sublime": [".tex", ".md", ".txt"],
+
 	// Annotations next to the lines (kind letter, title, ✓/✗). Set to false
 	// to use only the sidebar (Margin: Show/hide sidebar).
 	"inline_annotations": true,
