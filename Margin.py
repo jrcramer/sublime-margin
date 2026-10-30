@@ -4,12 +4,21 @@ Sublime layer only. All logic that does not need Sublime lives in margin_core.
 """
 
 import html
+import importlib
 import os
 import re
+import sys
 import threading
 
 import sublime
 import sublime_plugin
+
+# Sublime reloads this file after an update, but not margin_core: reload it
+# here (dependencies first) so a git pull needs no restart.
+for _name in ("structure", "notes", "sidecar", "protocol", "claude_runner"):
+    _mod = sys.modules.get("%s.margin_core.%s" % (__package__, _name))
+    if _mod is not None:
+        importlib.reload(_mod)
 
 from .margin_core import claude_runner, protocol
 from .margin_core import sidecar as sc
