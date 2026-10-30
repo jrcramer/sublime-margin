@@ -36,6 +36,11 @@
 	// Show the margin automatically when a document with a sidecar opens.
 	"auto_show": true,
 
+	// Kinds of items you do not want: Claude is asked to leave them out, and
+	// stored ones are hidden. Kinds: structure, direction, fact, stock,
+	// option, question, language, note. E.g. ["option"].
+	"skip_kinds": [],
+
 	// Annotations next to the lines (kind letter, title, ✓/✗). Set to false
 	// to use only the sidebar (Margin: Show/hide sidebar).
 	"inline_annotations": true,

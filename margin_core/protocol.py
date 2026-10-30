@@ -41,7 +41,7 @@ def fill(template, values):
 
 
 def build(kind, text, root, profile, data, doc_name, selection=None,
-          question=None, override_dir=None, response_language=None):
+          question=None, override_dir=None, response_language=None, skip_kinds=None):
     """Return (system_prompt, user_prompt) for a round."""
     if kind not in ROUND_KINDS:
         raise ValueError(kind)
@@ -59,6 +59,7 @@ def build(kind, text, root, profile, data, doc_name, selection=None,
         "selection": selection or "(no selection)",
         "question": question or "",
         "language": response_language or "the language the document is written in",
+        "skip_kinds": ", ".join(skip_kinds) if skip_kinds else "(none)",
     }
     system = fill(load_template("system", override_dir), values)
     user = fill(load_template(kind, override_dir), values)
@@ -84,7 +85,7 @@ def parse_response(text):
     return prose, payload
 
 
-def apply_payload(data, lines, payload, round_no, kind):
+def apply_payload(data, lines, payload, round_no, kind, skip_kinds=()):
     """Merge Claude's structured answer into the sidecar. Returns new items."""
     added = []
     if payload.get("direction"):
@@ -98,7 +99,7 @@ def apply_payload(data, lines, payload, round_no, kind):
         sc.set_labels(data, lines, labels, source="claude")
     for it in payload.get("items") or []:
         title = (it.get("title") or "").strip()
-        if not title:
+        if not title or it.get("kind") in skip_kinds:
             continue
         ln = _line(it.get("line"), lines)
         end = _line(it.get("end_line"), lines)

@@ -145,6 +145,8 @@ def render(doc):
             continue
         if it["status"] != "open" and not show_resolved:
             continue
+        if it["kind"] in setting("skip_kinds", []):
+            continue
         by_kind.setdefault(it["kind"], []).append(it)
 
     for kind, items in by_kind.items():
@@ -280,10 +282,18 @@ def open_sidebar(doc):
     return sheet
 
 
-def update_sidebar(doc):
+def update_sidebar(doc, repaint=False):
     sheet = sidebar_for(doc)
     if sheet is not None:
         sheet.set_contents(sidebar_html(doc))
+        if repaint:
+            # An HTML sheet that is not focused may not redraw until clicked;
+            # focus it for a moment and give focus back.
+            window = sheet.window()
+            back = window.active_sheet()
+            window.focus_sheet(sheet)
+            if back is not None:
+                window.focus_sheet(back)
 
 
 def close_sidebar(view_id):
@@ -333,7 +343,8 @@ def sidebar_html(doc):
                        depth * 0.9, act(doc, "goto", line=u.start), esc(name), u.start + 1,
                        (" · " + esc(function)) if function else ""))
 
-    items = [it for it in d["items"] if it["status"] == "open"]
+    items = [it for it in d["items"] if it["status"] == "open"
+             and it["kind"] not in setting("skip_kinds", [])]
     items.sort(key=lambda it: (it["anchor"] or {}).get("line", 10 ** 9))
     out.append("<h2>Checklist (%d open)</h2>" % len(items))
     for it in items:
@@ -433,7 +444,8 @@ def start_round(view, kind, question=None, selection=None):
             kind, text, doc.root, doc.profile, doc.data, os.path.basename(doc.path),
             selection=selection, question=question,
             override_dir=settings().get("prompt_dir"),
-            response_language=settings().get("response_language"))
+            response_language=settings().get("response_language"),
+            skip_kinds=setting("skip_kinds", []))
     except Exception as e:
         sublime.error_message("Margin: could not build prompt: %s" % e)
         return
@@ -461,7 +473,7 @@ def start_round(view, kind, question=None, selection=None):
         if err:
             doc.data["transcript"].append({"role": "error", "kind": kind, "at": sc.now(), "text": err})
             doc.save()
-            update_sidebar(doc)
+            update_sidebar(doc, repaint=True)
             if sidebar_for(doc) is None:
                 show_panel(view.window(), doc)
             sublime.status_message("Margin: Claude failed, see %s." % (
@@ -470,12 +482,14 @@ def start_round(view, kind, question=None, selection=None):
         doc.data["session_id"] = sid
         prose, payload = protocol.parse_response(result)
         lines = doc.lines()
-        added = protocol.apply_payload(doc.data, lines, payload, round_no, kind)
+        added = protocol.apply_payload(doc.data, lines, payload, round_no, kind,
+                                       setting("skip_kinds", []))
         doc.data["transcript"].append({"role": "claude", "kind": kind, "at": sc.now(),
                                        "text": prose, "items": [a["id"] for a in added]})
         doc.save()
         doc.visible = True
         render(doc)
+        update_sidebar(doc, repaint=True)
         if sidebar_for(doc) is None:
             show_panel(view.window(), doc)
         sublime.status_message("Margin: %s round done, %d items." % (ROUND_NAMES[kind], len(added)))
@@ -683,7 +697,8 @@ class MarginChecklistCommand(sublime_plugin.TextCommand):
             return
         doc.refresh()
         items = [it for it in doc.data["items"]
-                 if (kind is None or it["kind"] == kind) and (status == "all" or it["status"] == status)]
+                 if (kind is None or it["kind"] == kind) and (status == "all" or it["status"] == status)
+                 and it["kind"] not in setting("skip_kinds", [])]
         items.sort(key=lambda it: (it["anchor"] or {}).get("line", 10 ** 9))
         if not items:
             sublime.status_message("Margin: checklist is empty.")

@@ -13,6 +13,8 @@ How to behave:
 Context from the writer's settings:
 {{context}}
 
+The writer does not want items of these kinds (leave them out): {{skip_kinds}}
+
 Decisions so far:
 {{decisions}}
 
