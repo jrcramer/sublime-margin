@@ -5,6 +5,7 @@ Sublime layer only. All logic that does not need Sublime lives in margin_core.
 
 import html
 import os
+import re
 import threading
 
 import sublime
@@ -108,7 +109,8 @@ def line_region(view, line):
 def render(doc):
     view = doc.view
     clear(view)
-    if not doc.visible:
+    update_sidebar(doc)
+    if not doc.visible or not setting("inline_annotations", True):
         return
     colors = setting("colors", {})
 
@@ -239,6 +241,179 @@ def resolve(view, item_id, status):
 
 
 # --------------------------------------------------------------------------
+# Sidebar: an HTML sheet next to the document with direction, structure,
+# checklist and Claude's last answer. Links run margin_sidebar_action.
+
+_sidebars = {}  # view.id() -> HtmlSheet
+
+SIDEBAR_CSS = """
+body { padding: 0.6rem 1rem; font-size: 0.95rem; }
+h2 { font-size: 1.05rem; margin: 1rem 0 0.3rem 0; }
+a { text-decoration: none; }
+.dim { color: color(var(--foreground) alpha(0.55)); }
+.dir { font-style: italic; }
+.unit { margin: 0.1rem 0; }
+.item { margin: 0.35rem 0; }
+.answer { margin-top: 0.3rem; }
+.bar a { padding-right: 0.8rem; }
+"""
+
+
+def sidebar_for(doc):
+    sheet = _sidebars.get(doc.view.id())
+    if sheet is not None and sheet.window() is None:  # closed by the user
+        _sidebars.pop(doc.view.id(), None)
+        sheet = None
+    return sheet
+
+
+def open_sidebar(doc):
+    window = doc.view.window()
+    if window.num_groups() == 1:
+        window.set_layout({"cols": [0.0, 0.68, 1.0], "rows": [0.0, 1.0],
+                           "cells": [[0, 0, 1, 1], [1, 0, 2, 1]]})
+    group = 1 if window.get_view_index(doc.view)[0] == 0 else 0
+    sheet = window.new_html_sheet("Margin: " + os.path.basename(doc.path),
+                                  sidebar_html(doc), group=group)
+    _sidebars[doc.view.id()] = sheet
+    window.focus_view(doc.view)
+    return sheet
+
+
+def update_sidebar(doc):
+    sheet = sidebar_for(doc)
+    if sheet is not None:
+        sheet.set_contents(sidebar_html(doc))
+
+
+def close_sidebar(view_id):
+    sheet = _sidebars.pop(view_id, None)
+    if sheet is not None and sheet.window() is not None:
+        sheet.close()
+
+
+def act(doc, action, **args):
+    args.update(view_id=doc.view.id(), action=action)
+    return "subl:margin_sidebar_action " + html.escape(sublime.encode_value(args))
+
+
+def prose_html(text):
+    out = []
+    for para in (text or "").strip().split("\n\n"):
+        p = esc(para)
+        p = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", p)
+        p = re.sub(r"`([^`]+)`", r"<code>\1</code>", p)
+        p = re.sub(r"^#+\s*(.+)$", r"<b>\1</b>", p, flags=re.M)
+        out.append("<p>%s</p>" % p.replace("\n", "<br>"))
+    return "".join(out)
+
+
+def sidebar_html(doc):
+    d = doc.data
+    out = ["<style>%s</style>" % SIDEBAR_CSS]
+
+    rounds = [("mirror", "Mirror"), ("stock", "Stock"), ("ask", "Ask…")]
+    if doc.path in _running:
+        out.append('<div class="dim">Claude is reading…</div>')
+    else:
+        out.append('<div class="bar">%s</div>' % "".join(
+            '<a href=\'%s\'>%s</a>' % (act(doc, "round", kind=k), name) for k, name in rounds))
+
+    out.append("<h2>Direction</h2>")
+    out.append('<div class="dir">%s</div>' % (esc(d.get("direction")) or
+                                              '<span class="dim">not yet mirrored</span>'))
+
+    out.append("<h2>Structure</h2>")
+    entries = outline_entries(doc)
+    if not entries:
+        out.append('<div class="dim">no structure found</div>')
+    for u, depth, name, function in entries:
+        out.append('<div class="unit" style="margin-left: %.1frem">'
+                   '<a href=\'%s\'>%s</a> <span class="dim">r.%d%s</span></div>' % (
+                       depth * 0.9, act(doc, "goto", line=u.start), esc(name), u.start + 1,
+                       (" · " + esc(function)) if function else ""))
+
+    items = [it for it in d["items"] if it["status"] == "open"]
+    items.sort(key=lambda it: (it["anchor"] or {}).get("line", 10 ** 9))
+    out.append("<h2>Checklist (%d open)</h2>" % len(items))
+    for it in items:
+        a = it.get("anchor")
+        here = a and not a.get("lost")
+        color = setting("colors", {}).get(it["kind"], "#888")
+        title = esc(it["title"])
+        if here:
+            title = "<a href='%s'>%s</a>" % (act(doc, "show", item_id=it["id"]), title)
+        out.append(
+            '<div class="item"><span style="color: %s"><b>%s</b></span> %s '
+            '<span class="dim">%s</span><br>'
+            '<a href=\'%s\'>✓</a>&nbsp;&nbsp;<a href=\'%s\'>✗</a>&nbsp;&nbsp;'
+            '<a href=\'%s\'>done</a>%s</div>' % (
+                color, KIND_LETTERS.get(it["kind"], "•"), title,
+                ("r.%d" % (a["line"] + 1)) if here else "—",
+                act(doc, "resolve", item_id=it["id"], status="accepted"),
+                act(doc, "resolve", item_id=it["id"], status="rejected"),
+                act(doc, "resolve", item_id=it["id"], status="done"),
+                ("&nbsp;&nbsp;<a href='%s'>apply</a>" % act(doc, "apply", item_id=it["id"]))
+                if it.get("suggestion") and here else ""))
+
+    last = None
+    for e in reversed(d["transcript"]):
+        if e["role"] in ("claude", "error"):
+            last = e
+            break
+    out.append("<h2>Last answer</h2>")
+    if last is None:
+        out.append('<div class="dim">no rounds yet</div>')
+    else:
+        out.append('<div class="dim">%s · %s · <a href=\'%s\'>whole conversation</a></div>' % (
+            ROUND_NAMES.get(last.get("kind"), ""), last["at"].replace("T", " ")[:16],
+            act(doc, "conversation")))
+        if last["role"] == "error":
+            out.append('<div class="answer"><b>Error:</b> %s</div>' % esc(last["text"]))
+        else:
+            out.append('<div class="answer">%s</div>' % prose_html(last["text"]))
+    return "<body id='margin-sidebar'>%s</body>" % "".join(out)
+
+
+class MarginSidebarCommand(sublime_plugin.TextCommand):
+    """Show or hide the sidebar for this document."""
+    def run(self, edit):
+        doc = require_doc(self.view)
+        if not doc:
+            return
+        if sidebar_for(doc) is not None:
+            close_sidebar(self.view.id())
+        else:
+            doc.refresh()
+            open_sidebar(doc)
+
+
+class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
+    """Clicks in the sidebar."""
+    def run(self, view_id, action, line=None, item_id=None, status=None, kind=None):
+        view = next((v for v in self.window.views() if v.id() == view_id), None)
+        doc = view and doc_for(view, create=False)
+        if not doc:
+            return
+        self.window.focus_view(view)
+        if action == "goto":
+            goto(view, line)
+        elif action == "round":
+            view.run_command("margin_" + kind)
+        elif action == "conversation":
+            show_panel(self.window, doc, last_only=False)
+        elif action == "show":
+            it = sc.find(doc.data, item_id)
+            if it and it.get("anchor"):
+                goto(view, it["anchor"]["line"])
+                on_navigate(view, "open:" + item_id)
+        elif action == "resolve":
+            resolve(view, item_id, status)
+        elif action == "apply":
+            view.run_command("margin_apply_suggestion", {"item_id": item_id})
+
+
+# --------------------------------------------------------------------------
 # Rounds with Claude
 
 
@@ -264,6 +439,7 @@ def start_round(view, kind, question=None, selection=None):
         return
 
     _running.add(doc.path)
+    update_sidebar(doc)
     spinner(view, doc.path, ROUND_NAMES[kind], 0)
     round_no = sc.next_round(doc.data)
     doc.data["transcript"].append({"role": "user", "kind": kind, "at": sc.now(),
@@ -285,8 +461,11 @@ def start_round(view, kind, question=None, selection=None):
         if err:
             doc.data["transcript"].append({"role": "error", "kind": kind, "at": sc.now(), "text": err})
             doc.save()
-            show_panel(view.window(), doc)
-            sublime.status_message("Margin: Claude failed, see panel.")
+            update_sidebar(doc)
+            if sidebar_for(doc) is None:
+                show_panel(view.window(), doc)
+            sublime.status_message("Margin: Claude failed, see %s." % (
+                "sidebar" if sidebar_for(doc) else "panel"))
             return
         doc.data["session_id"] = sid
         prose, payload = protocol.parse_response(result)
@@ -297,7 +476,8 @@ def start_round(view, kind, question=None, selection=None):
         doc.save()
         doc.visible = True
         render(doc)
-        show_panel(view.window(), doc)
+        if sidebar_for(doc) is None:
+            show_panel(view.window(), doc)
         sublime.status_message("Margin: %s round done, %d items." % (ROUND_NAMES[kind], len(added)))
 
     threading.Thread(target=work, daemon=True).start()
@@ -403,20 +583,10 @@ class MarginOutlineCommand(sublime_plugin.TextCommand):
         if not doc:
             return
         doc.refresh()
-        lines = doc.lines()
-        labels = dict((l["anchor"]["line"], l) for l in doc.data["labels"] if not l["anchor"].get("lost"))
         entries = []
-        for u in doc.root.walk():
-            if u.kind == "document":
-                continue
-            lb = labels.get(u.start)
-            if u.kind == "paragraph" and not lb:
-                continue
-            indent = "    " if u.kind == "paragraph" else "  " * max(0, u.level - 1)
-            name = (lb and lb["label"]) or u.label or first_words(lines, u)
-            detail = (lb and lb.get("function")) or ""
+        for u, depth, name, detail in outline_entries(doc):
             entries.append((u.start, sublime.QuickPanelItem(
-                indent + name, detail, "r.%d–%d %s" % (u.start + 1, u.end + 1, u.kind))))
+                "  " * depth + name, detail, "r.%d–%d %s" % (u.start + 1, u.end + 1, u.kind))))
         if not entries:
             sublime.status_message("Margin: no structure found.")
             return
@@ -424,6 +594,23 @@ class MarginOutlineCommand(sublime_plugin.TextCommand):
             [e[1] for e in entries],
             lambda i: i >= 0 and goto(self.view, entries[i][0]),
             on_highlight=lambda i: goto(self.view, entries[i][0], select=False))
+
+
+def outline_entries(doc):
+    """(unit, depth, name, function) for headings, separators and labelled paragraphs."""
+    lines = doc.lines()
+    labels = dict((l["anchor"]["line"], l) for l in doc.data["labels"] if not l["anchor"].get("lost"))
+    out = []
+    for u in doc.root.walk():
+        if u.kind == "document":
+            continue
+        lb = labels.get(u.start)
+        if u.kind == "paragraph" and not lb:
+            continue
+        depth = 2 if u.kind == "paragraph" else max(0, u.level - 1)
+        name = (lb and lb["label"]) or u.label or first_words(lines, u)
+        out.append((u, depth, name, (lb and lb.get("function")) or ""))
+    return out
 
 
 def first_words(lines, u, n=50):
@@ -622,7 +809,7 @@ class MarginEvents(sublime_plugin.EventListener):
 
     def on_modified_async(self, view):
         doc = doc_for(view, create=False)
-        if not doc or not doc.visible:
+        if not doc or not (doc.visible or sidebar_for(doc)):
             return
         cc = view.change_count()
 
@@ -640,6 +827,7 @@ class MarginEvents(sublime_plugin.EventListener):
 
     def on_close(self, view):
         _docs.pop(view.id(), None)
+        close_sidebar(view.id())
 
     def on_hover(self, view, point, zone):
         doc = doc_for(view, create=False)
@@ -661,3 +849,5 @@ def plugin_unloaded():
     for w in sublime.windows():
         for v in w.views():
             clear(v)
+    for vid in list(_sidebars):
+        close_sidebar(vid)

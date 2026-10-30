@@ -43,6 +43,7 @@ All commands are in the Command Palette under **Margin:**.
 | **Mirror** | Claude reads the draft: labels for the units, the direction it sees, where the structure does not run, factual problems (with references), and two or three options for continuing. |
 | **Stock** | Inventory of material not (yet) in the draft: your marked notes and loose fragments, plus what Claude would add from the sources, each with where it could land. |
 | **Ask Claude…** | A question during writing, about the selection if there is one. Also in the right-click menu. |
+| **Show/hide sidebar** | A sheet next to the document with the direction, the structure (click to jump), the open checklist with ✓ / ✗, and Claude's last answer. While it is open, answers go there instead of the bottom panel. |
 | **Checklist** | All open items in line order. Pick one to jump there, then accept, reject (with reason), mark done, reopen, or apply a suggestion. |
 | **Outline / Go to unit** | Jump through sections, moves and labelled paragraphs. |
 | **Label this unit…** | Your own name for the unit at the cursor. Your labels always win over Claude's. |
@@ -100,6 +101,7 @@ See *Preferences → Package Settings → Margin → Settings*. Most relevant:
 - `claude_command`, `extra_path`, `model`, `claude_extra_args`, `timeout`
 - `claude_tools`: tools Claude may use while reading (default: web fetch and search, for checking quotations; `[]` for none)
 - `response_language`: e.g. `"Dutch"`; default is the language of the document
+- `inline_annotations`: `false` keeps the text clean and uses only the sidebar
 - `show_labels`, `show_resolved`, `colors`, `auto_show`, `sidecar_suffix`
 
 ## Privacy

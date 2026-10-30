@@ -36,6 +36,10 @@
 	// Show the margin automatically when a document with a sidecar opens.
 	"auto_show": true,
 
+	// Annotations next to the lines (kind letter, title, ✓/✗). Set to false
+	// to use only the sidebar (Margin: Show/hide sidebar).
+	"inline_annotations": true,
+
 	// Show unit labels in the margin, and resolved items too.
 	"show_labels": true,
 	"show_resolved": false,
