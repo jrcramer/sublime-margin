@@ -1,0 +1,107 @@
+// Margin settings. Copy keys you want to change into
+// Preferences > Package Settings > Margin > Settings (User).
+{
+	// How to start Claude Code. Sublime does not always see your shell PATH,
+	// so give the full path if "claude" is not found, e.g.
+	// ["/opt/homebrew/bin/claude"] or ["/Users/me/.local/bin/claude"].
+	"claude_command": ["claude"],
+
+	// Extra directories to search for the claude binary.
+	"extra_path": [],
+
+	// Tools Claude may use while reading along. Web access lets it check
+	// quotations against an online source. [] = no tools at all.
+	"claude_tools": ["WebFetch", "WebSearch"],
+
+	// Model alias or name, null = Claude Code's default.
+	"model": null,
+
+	// Any further command-line arguments for claude.
+	"claude_extra_args": [],
+
+	// Seconds before a round is given up.
+	"timeout": 600,
+
+	// Language of Claude's answers. null = the language of the document.
+	"response_language": null,
+
+	// Folder with your own versions of the prompt templates
+	// (system.md, mirror.md, stock.md, ask.md, language.md). Missing files
+	// fall back to the built-in ones.
+	"prompt_dir": null,
+
+	// The sidecar file next to each document.
+	"sidecar_suffix": ".margin.json",
+
+	// Show the margin automatically when a document with a sidecar opens.
+	"auto_show": true,
+
+	// Show unit labels in the margin, and resolved items too.
+	"show_labels": true,
+	"show_resolved": false,
+
+	// Margin colours per kind of item.
+	"colors": {
+		"label": "#7f8c99",
+		"structure": "#5b8def",
+		"direction": "#9b6dd6",
+		"fact": "#e0605a",
+		"stock": "#d9a43a",
+		"option": "#3fae7a",
+		"question": "#3aa6b9",
+		"language": "#8a8a8a",
+		"note": "#b0b0b0"
+	},
+
+	// Document profiles. The first whose selector matches the file's syntax
+	// is used. Patterns are regular expressions matched per line; level 1 is
+	// the coarsest unit. "separator": true marks dividers without a title.
+	"profiles": [
+		{
+			"name": "LaTeX",
+			"selector": "text.tex",
+			"comment_prefix": "%",
+			"body_start": "\\\\begin\\{document\\}",
+			"body_end": "\\\\end\\{document\\}",
+			"paragraphs": true,
+			// lines with only argument-less commands, such as \large or \hfill \jobname
+			"ignore": ["^\\s*(\\\\[a-zA-Z]+\\*?\\s*)+$"],
+			"structure": [
+				{"kind": "part",       "level": 1, "pattern": "^\\s*\\\\(?:part|chapter)\\*?\\{(.+?)\\}"},
+				{"kind": "section",    "level": 2, "pattern": "^\\s*\\\\section\\*?\\{(.+?)\\}"},
+				{"kind": "section",    "level": 2, "pattern": "^\\s*---\\s*(\\\\\\\\)?\\s*$", "separator": true},
+				{"kind": "subsection", "level": 3, "pattern": "^\\s*\\\\subsection\\*?\\{(.+?)\\}"}
+			],
+			"notes": {
+				"line_prefixes": ["%>"],
+				"environments": ["notes"],
+				"after_body": true
+			},
+			"context": ""
+		},
+		{
+			"name": "Markdown",
+			"selector": "text.html.markdown",
+			"comment_prefix": null,
+			"paragraphs": true,
+			"structure": [
+				{"kind": "part",       "level": 1, "pattern": "^#\\s+(.+)"},
+				{"kind": "section",    "level": 2, "pattern": "^##\\s+(.+)"},
+				{"kind": "section",    "level": 2, "pattern": "^\\s*(?:---|\\*\\*\\*)\\s*$", "separator": true},
+				{"kind": "subsection", "level": 3, "pattern": "^###\\s+(.+)"}
+			],
+			"notes": {"line_prefixes": ["> NOTE:", "<!-- note:"]},
+			"context": ""
+		},
+		{
+			"name": "Plain text",
+			"selector": "",
+			"paragraphs": true,
+			"structure": [
+				{"kind": "section", "level": 2, "pattern": "^\\s*(?:---|\\*\\s*\\*\\s*\\*)\\s*$", "separator": true}
+			],
+			"notes": {"line_prefixes": [">>"]},
+			"context": ""
+		}
+	]
+}

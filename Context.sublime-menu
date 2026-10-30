@@ -1,0 +1,7 @@
+[
+	{ "caption": "-" },
+	{ "caption": "Margin: Ask Claude about this…", "command": "margin_ask" },
+	{ "caption": "Margin: Label this unit…", "command": "margin_label_unit" },
+	{ "caption": "Margin: Add note here…", "command": "margin_note" },
+	{ "caption": "-" }
+]

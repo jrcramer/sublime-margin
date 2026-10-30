@@ -1,0 +1,32 @@
+// Example user settings for sermon manuscripts written in LaTeX, where
+//  - one line is one spoken unit (lines end in \\),
+//  - "---\\" divides the sermon into sections,
+//  - an occasional titled-move form uses a bold title alone on a line,
+//  - loose notes are kept as "%>" comments or after \end{document}.
+// Copy into Preferences > Package Settings > Margin > Settings (User)
+// and adjust the "context" to your own tradition and Bible translation.
+{
+	"response_language": "Dutch",
+	"profiles": [
+		{
+			"name": "Sermon (LaTeX)",
+			"selector": "text.tex",
+			"comment_prefix": "%",
+			"body_start": "\\\\begin\\{document\\}",
+			"body_end": "\\\\end\\{document\\}",
+			"paragraphs": true,
+			"ignore": ["^\\s*(\\\\[a-zA-Z]+\\*?\\s*)+$"],
+			"structure": [
+				{"kind": "section", "level": 2, "pattern": "^\\s*\\\\section\\*?\\{(.+?)\\}"},
+				{"kind": "section", "level": 2, "pattern": "^\\s*---\\s*(\\\\\\\\)?\\s*$", "separator": true},
+				{"kind": "move",    "level": 3, "pattern": "^\\s*\\\\textbf\\{([^}]+)\\}\\s*(\\\\\\\\)?\\s*$"}
+			],
+			"notes": {
+				"line_prefixes": ["%>"],
+				"environments": ["notes"],
+				"after_body": true
+			},
+			"context": "Sermon manuscripts, written to be spoken: one line is one breath unit. Sections are divided by '---'. Sometimes the sermon follows David Buttrick's moves, with bold move titles. Quote the Bible from the NBV21 and check quotations against it. The writer's sermons aim to be christological rather than exemplary."
+		}
+	]
+}
