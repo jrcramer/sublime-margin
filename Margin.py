@@ -83,6 +83,7 @@ class Doc(object):
         self.data = sc.load(self.sidecar_path, self.path)
         self.visible = False
         self.collapsed = set()  # sidebar sections folded in
+        self.suggested = None   # cached link suggestions, see suggested_files
         self.root = None
         self.refresh()
 
@@ -311,6 +312,7 @@ def open_sidebar(doc):
     sheet = window.new_html_sheet("Margin: " + os.path.basename(doc.path),
                                   sidebar_html(doc), group=group)
     _sidebars[doc.view.id()] = sheet
+    doc.suggested = None
     window.focus_view(doc.view)
     return sheet
 
@@ -437,7 +439,15 @@ def sidebar_html(doc):
             out.append('<div class="unit"><a href=\'%s\'>%s</a> <span class="dim">%s</span>'
                        '&nbsp;&nbsp;<a class="dim" href=\'%s\'>unlink</a></div>' % (
                            act(doc, "open_link", path=rel), esc(os.path.basename(rel)),
-                           esc(mtime or "missing"), act(doc, "unlink", path=rel)))
+                           esc(mtime if os.path.exists(path) else "missing"), act(doc, "unlink", path=rel)))
+        sugg = suggested_files(doc)
+        if sugg:
+            out.append('<div class="dim" style="margin-top: 0.3rem">Same text, not linked:</div>')
+        for rel, path, date in sugg:
+            out.append('<div class="unit"><a href=\'%s\'>%s</a> <span class="dim">%s</span>'
+                       '&nbsp;&nbsp;<a href=\'%s\'>link</a></div>' % (
+                           act(doc, "open_link", path=rel), esc(rel), esc(date or ""),
+                           act(doc, "link_this", path=rel)))
         out.append("<div><a href='%s'>+ link a file…</a></div>" % act(doc, "link"))
 
     if section("direction", "Direction"):
@@ -536,6 +546,9 @@ class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
         if action == "unlink":
             set_link(doc.path, os.path.normpath(os.path.join(os.path.dirname(doc.path), path)), False)
             return update_sidebar(doc, repaint=True)
+        if action == "link_this":
+            set_link(doc.path, os.path.normpath(os.path.join(os.path.dirname(doc.path), path)), True)
+            return update_sidebar(doc, repaint=True)
         if action == "open_link":
             target = os.path.normpath(os.path.join(os.path.dirname(doc.path), path))
             return open_related(self.window, view, target)
@@ -590,13 +603,46 @@ def linked_files(doc):
     base = os.path.dirname(doc.path)
     for rel in doc.data.get("links", []):
         path = os.path.normpath(os.path.join(base, rel))
-        try:
-            mt = os.path.getmtime(path)
-        except OSError:
-            mt = None
-        out.append((rel, path, mt))
-    out.sort(key=lambda e: e[2] or 0, reverse=True)
-    return [(rel, path, mt and time.strftime("%Y-%m-%d", time.localtime(mt))) for rel, path, mt in out]
+        out.append((rel, path, file_date(path)))
+    out.sort(key=lambda e: e[2] or "", reverse=True)
+    return out
+
+
+def file_date(path):
+    """A date in the file name (20261004, 2026-10-04), else the file's own date."""
+    m = re.search(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})(?!\d)", os.path.basename(path))
+    if m and 1 <= int(m.group(2)) <= 12 and 1 <= int(m.group(3)) <= 31:
+        return "%s-%s-%s" % m.groups()
+    try:
+        return time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(path)))
+    except OSError:
+        return None
+
+
+def name_key(path):
+    """What links files by name, from the link_key pattern: for sermons the
+    Bible text, e.g. Joh02.1-12 -> ("joh", 2). Numbers lose leading zeros."""
+    pattern = setting("link_key")
+    if not pattern:
+        return None
+    m = re.search(pattern, os.path.basename(path))
+    if not m:
+        return None
+    return tuple(str(int(g)) if g.isdigit() else g.lower() for g in m.groups() if g is not None)
+
+
+def suggested_files(doc):
+    """Files near the document with the same name key, not linked yet, newest first.
+    Only suggestions: several versions and liturgies may fit, the writer links."""
+    if doc.suggested is None:
+        key = name_key(doc.path)
+        doc.suggested = [] if key is None else [
+            f for f in link_candidates(doc) if name_key(f) == key]
+    base = os.path.dirname(doc.path)
+    linked = set(os.path.normpath(os.path.join(base, rel)) for rel in doc.data.get("links", []))
+    out = [(os.path.relpath(f, base), f, file_date(f)) for f in doc.suggested if f not in linked]
+    out.sort(key=lambda e: e[2] or "", reverse=True)
+    return out
 
 
 def set_link(a, b, on=True):
@@ -633,14 +679,14 @@ def open_related(window, view, path):
 
 
 def link_candidates(doc, limit=400):
-    """Files near the document, newest first: its folder, the folder above
-    it, and that folder's other subfolders."""
+    """Files near the document, newest first: its folder and the folder
+    above it, each with their subfolders (one level)."""
     here = os.path.dirname(doc.path)
     up = os.path.dirname(here)
     exts = tuple(setting("link_extensions", [".tex", ".md", ".txt", ".docx", ".pdf"]))
     suffix = setting("sidecar_suffix", ".margin.json")
     seen, out = set(), []
-    for top, depth in ((here, 0), (up, 1)):
+    for top, depth in ((here, 1), (up, 1)):
         try:
             names = os.listdir(top)
         except OSError:
@@ -703,6 +749,7 @@ def follow_sidebar(view):
         _sidebar_last.pop(vid, None)
         _sidebars[view.id()] = sheet
         sheet.set_name("Margin: " + os.path.basename(doc.path))
+        doc.suggested = None  # look again for new files
         doc.refresh()
         update_sidebar(doc, repaint=True)
         return
