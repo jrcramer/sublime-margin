@@ -29,6 +29,6 @@ Sublime Text 4 plugin: structure view + Claude Code as a sparring partner that r
 
 ## Open / next
 
-- **UX decision pending:** the user pictured a *side panel* (HTML sheet in a second column) holding direction, clickable structure tree, checklist with ✓/✗, Claude's answer — not inline annotations. Open question to the user: panel as overview only (conversation in Terminal via `claude --resume <id>`), or conversation readable in the panel too.
+- **Sidebar (decided, first version built):** HTML sheet in a second column (`margin_sidebar`) with direction, clickable structure, open checklist with ✓/✗/done/apply, and Claude's *last* answer; the whole conversation stays in the bottom panel / Terminal. Inline annotations stay too (`inline_annotations` setting turns them off). Links are `subl:margin_sidebar_action {...}`. Not yet tried in real Sublime.
 - Command to open the document's session in Terminal (`cd <doc dir> && claude --resume <session_id>`).
 - Real end-to-end test with Claude on the user's Mac (not possible in the build container).

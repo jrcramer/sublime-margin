@@ -7,6 +7,7 @@
 	{ "caption": "Margin: Outline / Go to unit", "command": "margin_outline" },
 	{ "caption": "Margin: Label this unit…", "command": "margin_label_unit" },
 	{ "caption": "Margin: Add note at cursor…", "command": "margin_note" },
+	{ "caption": "Margin: Show/hide sidebar", "command": "margin_sidebar" },
 	{ "caption": "Margin: Show/hide margin", "command": "margin_toggle" },
 	{ "caption": "Margin: Show last answer", "command": "margin_show_answer" },
 	{ "caption": "Margin: Show whole conversation", "command": "margin_show_answer", "args": {"full": true} },
