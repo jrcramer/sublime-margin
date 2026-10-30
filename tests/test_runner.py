@@ -54,3 +54,23 @@ def test_missing_binary_message():
         cr.run({"claude_command": ["/nonexistent/claude"]}, "S", "q")
     except cr.ClaudeError as e:
         assert "claude_command" in str(e)
+
+
+def test_auth_error_gets_login_hint(tmp_path):
+    exe = fake_claude(tmp_path,
+        "print('Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":"
+        "{\"type\":\"authentication_error\",\"message\":\"OAuth access token is invalid.\"}}')\n"
+        "sys.exit(1)\n")
+    try:
+        cr.run({"claude_command": [exe]}, "S", "q")
+    except cr.ClaudeError as e:
+        assert "/login" in str(e) and "401" in str(e)
+    else:
+        raise AssertionError("expected ClaudeError")
+
+
+def test_inherited_path_wins_over_common_dirs(monkeypatch):
+    monkeypatch.setenv("PATH", "/my/bin")
+    parts = cr._env(["/extra"])["PATH"].split(":")
+    assert parts[0] == "/extra" and parts[1] == "/my/bin"
+    assert parts.index("/my/bin") < parts.index("/opt/homebrew/bin")

@@ -16,15 +16,30 @@ COMMON_BIN_DIRS = [
 ]
 
 
+AUTH_HINT = ("Claude Code is not logged in (or its login expired). In a terminal, "
+             "run `claude`, type /login, then try again.")
+
+
 class ClaudeError(Exception):
     pass
 
 
 def _env(extra_path):
+    # extra_path first (the user's explicit choice), then the inherited PATH,
+    # and only then the usual install dirs, so an old copy of claude in one of
+    # those dirs does not shadow the one the terminal uses.
     env = dict(os.environ)
-    dirs = [os.path.expanduser(d) for d in (extra_path or []) + COMMON_BIN_DIRS]
-    env["PATH"] = os.pathsep.join(dirs + [env.get("PATH", "")])
+    dirs = [os.path.expanduser(d) for d in extra_path or []]
+    dirs.append(env.get("PATH", ""))
+    dirs += [os.path.expanduser(d) for d in COMMON_BIN_DIRS]
+    env["PATH"] = os.pathsep.join(d for d in dirs if d)
     return env
+
+
+def _is_auth_error(msg):
+    m = msg.lower()
+    return ("401" in m or "authenticat" in m or "/login" in m) and \
+        ("token" in m or "authenticat" in m or "log in" in m or "login" in m)
 
 
 def build_argv(settings, system_prompt, session_id, resume):
@@ -80,5 +95,7 @@ def _run_once(settings, system_prompt, user_prompt, sid, resume, cwd):
             data = None
     if proc.returncode != 0 or data is None or data.get("is_error"):
         msg = (data or {}).get("result") or err or out or ("exit code %d" % proc.returncode)
+        if _is_auth_error(msg):
+            msg = AUTH_HINT + "\n\n" + msg
         raise ClaudeError(msg[:2000])
     return data.get("result", ""), data.get("session_id") or sid
