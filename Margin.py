@@ -269,6 +269,7 @@ def resolve(view, item_id, status):
 # checklist and Claude's last answer. Links run margin_sidebar_action.
 
 _sidebars = {}  # view.id() -> HtmlSheet
+_sidebar_last = {}  # view.id() -> last HTML sent to the sheet
 
 SIDEBAR_CSS = """
 body { padding: 0.6rem 1rem; font-size: 0.95rem; }
@@ -310,7 +311,13 @@ def open_sidebar(doc):
 def update_sidebar(doc, repaint=False):
     sheet = sidebar_for(doc)
     if sheet is not None:
-        sheet.set_contents(sidebar_html(doc))
+        # Skip unchanged content: set_contents scrolls the sheet back to the top,
+        # which would happen on every pause while typing.
+        content = sidebar_html(doc)
+        if content == _sidebar_last.get(doc.view.id()) and not repaint:
+            return
+        _sidebar_last[doc.view.id()] = content
+        sheet.set_contents(content)
         if repaint:
             # An HTML sheet that is not focused may not redraw until clicked;
             # focus it for a moment and give focus back.
@@ -323,6 +330,7 @@ def update_sidebar(doc, repaint=False):
 
 def close_sidebar(view_id):
     sheet = _sidebars.pop(view_id, None)
+    _sidebar_last.pop(view_id, None)
     if sheet is not None and sheet.window() is not None:
         sheet.close()
 
@@ -544,6 +552,7 @@ def start_round(view, kind, question=None, selection=None):
         sublime.error_message("Margin: could not build prompt: %s" % e)
         return
 
+    sent_lines = text.split("\n")  # Claude's line numbers refer to this text
     _running.add(doc.path)
     update_sidebar(doc)
     spinner(view, doc.path, ROUND_NAMES[kind], 0)
@@ -575,10 +584,12 @@ def start_round(view, kind, question=None, selection=None):
             return
         doc.data["session_id"] = sid
         prose, payload = protocol.parse_response(result)
-        lines = doc.lines()
-        added = protocol.apply_payload(doc.data, lines, payload, round_no, kind,
+        # Anchor to the text Claude read, then move the anchors to wherever
+        # those lines are now, in case the writer kept writing meanwhile.
+        added = protocol.apply_payload(doc.data, sent_lines, payload, round_no, kind,
                                        setting("skip_kinds", []))
         updated = sc.apply_updates(doc.data, payload.get("updates"))
+        doc.refresh()
         doc.data["transcript"].append({"role": "claude", "kind": kind, "at": sc.now(),
                                        "text": prose, "items": [a["id"] for a in added]})
         doc.save()
