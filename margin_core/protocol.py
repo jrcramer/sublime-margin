@@ -14,7 +14,7 @@ from . import sidecar as sc
 from .structure import outline_text
 
 PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts")
-ROUND_KINDS = ("mirror", "stock", "ask", "language")
+ROUND_KINDS = ("mirror", "stock", "ask", "react", "language")
 
 
 def numbered(lines, first=0, last=None):

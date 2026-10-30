@@ -153,14 +153,44 @@ def find(data, item_id):
     return None
 
 
-def set_status(data, item_id, status, reason=None):
+WEIGHTS = ("high", "normal", "low")
+
+
+def set_status(data, item_id, status, reason=None, by="user"):
     it = find(data, item_id)
     if it and status in STATUSES:
         it["status"] = status
         if reason is not None:
             it["reason"] = reason
         it["resolved"] = now()
+        it["status_by"] = by
     return it
+
+
+def apply_updates(data, updates):
+    """Claude's re-weighing of open items. Returns the items changed.
+
+    Claude may change the weight of an open item, close it as done, or reopen
+    one it closed itself. What the writer decided is never touched.
+    """
+    changed = []
+    for up in updates or []:
+        it = find(data, str(up.get("id", "")))
+        if not it:
+            continue
+        own = it["status"] == "open" or it.get("status_by") == "claude"
+        if not own:
+            continue
+        note = (up.get("reason") or "").strip() or None
+        if up.get("weight") in WEIGHTS:
+            it["weight"] = up["weight"]
+        if up.get("status") in ("open", "done"):
+            set_status(data, it["id"], up["status"], by="claude")
+            it["seen"] = False
+        if note:
+            it["claude_note"] = note
+        changed.append(it)
+    return changed
 
 
 def set_labels(data, lines, labels, source="claude"):
@@ -202,8 +232,9 @@ def decisions_text(data):
         if it.get("anchor") and not it["anchor"].get("lost"):
             line = " (r.%d)" % (it["anchor"]["line"] + 1)
         reason = (" — reason: %s" % it["reason"]) if it.get("reason") else ""
-        out.append("- [%s] %s/%s%s: %s%s" % (it["status"], it["kind"], it["source"],
-                                            line, it["title"], reason))
+        by = " by you" if it.get("status_by") == "claude" else ""
+        out.append("- [%s%s] %s/%s%s: %s%s" % (it["status"], by, it["kind"], it["source"],
+                                              line, it["title"], reason))
     return "\n".join(out) if out else "(no decisions yet)"
 
 
@@ -215,5 +246,6 @@ def open_items_text(data):
         line = ""
         if it.get("anchor") and not it["anchor"].get("lost"):
             line = " (r.%d)" % (it["anchor"]["line"] + 1)
-        out.append("- %s%s: %s" % (it["kind"], line, it["title"]))
+        weight = (" [%s]" % it["weight"]) if it.get("weight", "normal") != "normal" else ""
+        out.append("- [%s] %s%s%s: %s" % (it["id"], it["kind"], line, weight, it["title"]))
     return "\n".join(out) if out else "(none)"

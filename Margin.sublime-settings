@@ -41,6 +41,10 @@
 	// option, question, language, note. E.g. ["option"].
 	"skip_kinds": [],
 
+	// Kinds hidden from view only (Claude still makes them). The legend in
+	// the sidebar switches these on and off.
+	"hidden_kinds": [],
+
 	// Annotations next to the lines (kind letter, title, ✓/✗). Set to false
 	// to use only the sidebar (Margin: Show/hide sidebar).
 	"inline_annotations": true,

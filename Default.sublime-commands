@@ -2,6 +2,7 @@
 	{ "caption": "Margin: Mirror (structure, direction, options)", "command": "margin_mirror" },
 	{ "caption": "Margin: Stock (unused notes and material)", "command": "margin_stock" },
 	{ "caption": "Margin: Ask Claude…", "command": "margin_ask" },
+	{ "caption": "Margin: React to the last round… (Claude re-weighs open items)", "command": "margin_react" },
 	{ "caption": "Margin: Checklist (open)", "command": "margin_checklist" },
 	{ "caption": "Margin: Checklist (all, incl. resolved)", "command": "margin_checklist", "args": {"status": "all"} },
 	{ "caption": "Margin: Outline / Go to unit", "command": "margin_outline" },
