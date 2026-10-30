@@ -60,6 +60,7 @@ def build(kind, text, root, profile, data, doc_name, selection=None,
         "question": question or "",
         "language": response_language or "the language the document is written in",
         "skip_kinds": ", ".join(skip_kinds) if skip_kinds else "(none)",
+        "kinds_on": ", ".join(data.get("kinds_on", [])) or "(none)",
     }
     system = fill(load_template("system", override_dir), values)
     user = fill(load_template(kind, override_dir), values)

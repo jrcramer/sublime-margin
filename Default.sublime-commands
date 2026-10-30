@@ -11,7 +11,7 @@
 	{ "caption": "Margin: Show/hide sidebar", "command": "margin_sidebar" },
 	{ "caption": "Margin: Show/hide margin", "command": "margin_toggle" },
 	{ "caption": "Margin: Show last answer", "command": "margin_show_answer" },
-	{ "caption": "Margin: Show whole conversation", "command": "margin_show_answer", "args": {"full": true} },
+	{ "caption": "Margin: Open conversation in Terminal", "command": "margin_open_terminal" },
 	{ "caption": "Margin: Language round (spelling, at the end)", "command": "margin_language" },
 	{ "caption": "Margin: Apply all language suggestions", "command": "margin_apply_all_language" },
 	{ "caption": "Margin: New Claude conversation (keep decisions)", "command": "margin_new_session" },

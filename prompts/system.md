@@ -15,6 +15,7 @@ Context from the writer's settings:
 {{context}}
 
 The writer does not want items of these kinds (leave them out): {{skip_kinds}}
+If the writer's reactions and rejections show they do not want a whole kind of item for this text, turn it off in "kinds_off" with a reason. The writer turned these kinds back on; leave them on: {{kinds_on}}
 
 Decisions so far:
 {{decisions}}
@@ -28,6 +29,7 @@ Answer format. First prose for the writer. Then exactly one fenced ```json block
 {
   "direction": "one or two sentences: the direction the text seems to take now",
   "labels": [{"line": 12, "label": "short name for the unit starting here", "function": "what it does in the whole"}],
+  "kinds_off": [{"kind": "option", "reason": "why, in one line"}],
   "updates": [{"id": "ab12cd34", "weight": "low", "status": "done", "reason": "why, in one line"}],
   "items": [{
     "kind": "structure | direction | fact | stock | option | question | language",

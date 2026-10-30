@@ -43,7 +43,11 @@ def empty(doc_path):
         "direction": None,
         "labels": [],      # structure labels: {anchor, label, function, source}
         "items": [],       # annotations / checklist entries
-        "transcript": [],  # {role, kind, text, at}
+        # Only Claude's last answer: the conversation itself lives in the
+        # Claude Code session (claude --resume <session_id>).
+        "last_answer": None,  # {kind, at, question, text, error}
+        "kinds_off": {},      # kind -> reason, turned off by Claude
+        "kinds_on": [],       # kinds the writer turned back on; Claude leaves them on
     }
 
 
@@ -54,7 +58,32 @@ def load(path, doc_path=None):
         data = json.load(f)
     base = empty(doc_path or path)
     base.update(data)
+    # Older sidecars kept the whole conversation; keep only the last answer.
+    old = base.pop("transcript", None)
+    if old and not base.get("last_answer"):
+        for e in reversed(old):
+            if e.get("role") in ("claude", "error"):
+                base["last_answer"] = {"kind": e.get("kind"), "at": e.get("at"), "question": None,
+                                       "text": e.get("text", ""), "error": e["role"] == "error"}
+                break
     return base
+
+
+def off_kinds(data, writer_off):
+    """Kinds not shown or asked for: the writer's own plus Claude's, minus kinds the writer kept on."""
+    claude_off = set(data.get("kinds_off", {})) - set(data.get("kinds_on", []))
+    return set(writer_off or []) | claude_off
+
+
+def apply_kinds_off(data, entries):
+    """Claude turning off a whole kind for this document. Returns kinds turned off."""
+    done = []
+    for e in entries or []:
+        kind = e.get("kind") if isinstance(e, dict) else e
+        if kind in KINDS and kind not in data.get("kinds_on", []):
+            data.setdefault("kinds_off", {})[kind] = (e.get("reason") if isinstance(e, dict) else None) or ""
+            done.append(kind)
+    return done
 
 
 def save(path, data):
