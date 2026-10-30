@@ -57,21 +57,27 @@ def build_argv(settings, system_prompt, session_id, resume):
     return argv
 
 
-def run(settings, system_prompt, user_prompt, session_id=None, cwd=None):
-    """Return (result_text, session_id). Raises ClaudeError."""
+def run(settings, system_prompt, user_prompt, session_id=None, cwd=None, info=None):
+    """Return (result_text, session_id). Raises ClaudeError.
+
+    ``info``, if given, is filled with what Claude Code reports about the
+    round: token usage, turns, and whether a new session had to be started.
+    """
     resume = bool(session_id)
     sid = session_id or str(uuid.uuid4())
+    info = {} if info is None else info
     try:
-        return _run_once(settings, system_prompt, user_prompt, sid, resume, cwd)
+        return _run_once(settings, system_prompt, user_prompt, sid, resume, cwd, info)
     except ClaudeError as e:
         # A session made on another machine (or deleted) cannot be resumed:
         # start a fresh one; the sidecar still carries all decisions.
         if resume and "conversation" in str(e).lower() and "found" in str(e).lower():
-            return _run_once(settings, system_prompt, user_prompt, str(uuid.uuid4()), False, cwd)
+            info["new_session"] = True
+            return _run_once(settings, system_prompt, user_prompt, str(uuid.uuid4()), False, cwd, info)
         raise
 
 
-def _run_once(settings, system_prompt, user_prompt, sid, resume, cwd):
+def _run_once(settings, system_prompt, user_prompt, sid, resume, cwd, info):
     argv = build_argv(settings, system_prompt, sid, resume)
     try:
         proc = subprocess.run(
@@ -98,4 +104,7 @@ def _run_once(settings, system_prompt, user_prompt, sid, resume, cwd):
         if _is_auth_error(msg):
             msg = AUTH_HINT + "\n\n" + msg
         raise ClaudeError(msg[:2000])
+    info["usage"] = data.get("usage") or {}
+    info["num_turns"] = data.get("num_turns")
+    info["new_session"] = info.get("new_session", False) or not resume
     return data.get("result", ""), data.get("session_id") or sid

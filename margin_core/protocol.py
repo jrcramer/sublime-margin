@@ -14,7 +14,7 @@ from . import sidecar as sc
 from .structure import outline_text
 
 PROMPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "prompts")
-ROUND_KINDS = ("mirror", "stock", "ask", "react", "language")
+ROUND_KINDS = ("mirror", "stock", "ask", "language")
 
 
 def numbered(lines, first=0, last=None):
@@ -41,7 +41,8 @@ def fill(template, values):
 
 
 def build(kind, text, root, profile, data, doc_name, selection=None,
-          question=None, override_dir=None, response_language=None, skip_kinds=None):
+          question=None, override_dir=None, response_language=None, skip_kinds=None,
+          doc_path=None):
     """Return (system_prompt, user_prompt) for a round."""
     if kind not in ROUND_KINDS:
         raise ValueError(kind)
@@ -49,6 +50,7 @@ def build(kind, text, root, profile, data, doc_name, selection=None,
     labels = dict((l["anchor"]["line"], l["label"]) for l in data.get("labels", []))
     values = {
         "document_name": doc_name,
+        "document_path": doc_path or doc_name,
         "document": numbered(lines),
         "outline": outline_text(root, lines, labels),
         "notes": notes_mod.notes_text(notes_mod.extract(text, profile)),
@@ -60,6 +62,7 @@ def build(kind, text, root, profile, data, doc_name, selection=None,
         "question": question or "",
         "language": response_language or "the language the document is written in",
         "skip_kinds": ", ".join(skip_kinds) if skip_kinds else "(none)",
+        "kinds_on": ", ".join(data.get("kinds_on", [])) or "(none)",
     }
     system = fill(load_template("system", override_dir), values)
     user = fill(load_template(kind, override_dir), values)

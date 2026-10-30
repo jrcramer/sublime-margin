@@ -42,15 +42,16 @@ All commands are in the Command Palette under **Margin:**.
 |---|---|
 | **Mirror** | Claude reads the draft: labels for the units, the direction it sees, where the structure does not run, factual problems (with references), and two or three options for continuing. |
 | **Stock** | Inventory of material not (yet) in the draft: your marked notes and loose fragments, plus what Claude would add from the sources, each with where it could land. |
-| **Ask Claude…** | A question during writing, about the selection if there is one. Also in the right-click menu. |
+| **Ask Claude…** | A question or a general reaction ("the exegetical detail matters less here"), about the selection if there is one. The document is not sent along: Claude reads the saved file only if the question needs it, so a conversation stays light. A reaction makes Claude re-weigh the open items. Also in the right-click menu. |
 | **Show/hide sidebar** | A sheet next to the document with the direction, the structure (click to jump), the open checklist with ✓ / ✗, and Claude's last answer. While it is open, answers go there instead of the bottom panel. |
-| **React to the last round…** | A general reaction ("the exegetical detail matters less to me here"). Claude interprets it and re-weighs the open items: lower or higher weight, or closed with a reason. What you accepted or rejected is never changed. Items Claude closed appear under *Changed by Claude* in the sidebar until you mark them fine or reopen them. |
+| **Link a related file…** | Link, say, a sermon and its liturgies. Pick from the files near the document, newest first; the link shows in the sidebar of both files (newest first) and opens with a click. With `link_key` set, files whose names share the same key (e.g. the Bible text) are suggested underneath, to link with one click. |
 | **Checklist** | All open items in line order. Pick one to jump there, then accept, reject (with reason), mark done, reopen, or apply a suggestion. |
 | **Outline / Go to unit** | Jump through sections, moves and labelled paragraphs. |
 | **Label this unit…** | Your own name for the unit at the cursor. Your labels always win over Claude's. |
 | **Add note at cursor…** | A reminder of your own in the margin and checklist. |
 | **Language round** | Spelling and typos, once, at the end. Each finding is an applicable suggestion; **Apply all language suggestions** does them in one go (undo works). A suggestion is refused if its line changed in the meantime. |
-| **Show last answer / whole conversation** | Claude's prose in a panel. |
+| **Show last answer** | Claude's prose of the last round in a panel. |
+| **Open conversation in Terminal** | The whole conversation lives in the document's Claude Code session; this opens it with `claude --resume` (on macOS in Terminal, elsewhere the command is copied). |
 | **New Claude conversation** | Starts a fresh Claude session; checklist, labels and decisions stay. |
 
 In every round, the open items go to Claude with their ids, so the list works both ways: Claude can re-weigh or close its own points when the text changes, and you decide with ✓ (agree: the point stands, you will do or did it), ✗ (not this, with a reason Claude respects) or *done* (handled in the text).
@@ -104,6 +105,7 @@ See *Preferences → Package Settings → Margin → Settings*. Most relevant:
 - `claude_command`, `extra_path`, `model`, `claude_extra_args`, `timeout`
 - `claude_tools`: tools Claude may use while reading (default: web fetch and search, for checking quotations; `[]` for none)
 - `response_language`: e.g. `"Dutch"`; default is the language of the document
+- `skip_kinds`: kinds you never want (the sidebar legend switches them)
 - `inline_annotations`: `false` keeps the text clean and uses only the sidebar
 - `show_labels`, `show_resolved`, `colors`, `auto_show`, `sidecar_suffix`
 

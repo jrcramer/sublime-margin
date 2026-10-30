@@ -7,8 +7,11 @@ import html
 import importlib
 import os
 import re
+import shlex
+import subprocess
 import sys
 import threading
+import time
 
 import sublime
 import sublime_plugin
@@ -52,9 +55,13 @@ def setting(key, default=None):
     return default if v is None else v
 
 
-def shown(it):
-    """Whether an item's kind is switched on (skip_kinds and the legend)."""
-    return it["kind"] not in setting("skip_kinds", []) and it["kind"] not in setting("hidden_kinds", [])
+def off_kinds(doc):
+    """Kinds switched off: by the writer (skip_kinds, the legend) or by Claude for this text."""
+    return sc.off_kinds(doc.data, setting("skip_kinds", []))
+
+
+def shown(doc, it):
+    return it["kind"] not in off_kinds(doc)
 
 
 def runner_settings():
@@ -76,6 +83,7 @@ class Doc(object):
         self.data = sc.load(self.sidecar_path, self.path)
         self.visible = False
         self.collapsed = set()  # sidebar sections folded in
+        self.suggested = None   # cached link suggestions, see suggested_files
         self.root = None
         self.refresh()
 
@@ -98,7 +106,7 @@ class Doc(object):
         sc.relocate_all(self.data, text.split("\n"))
 
     def save(self):
-        if self.data["items"] or self.data["labels"] or self.data["session_id"]:
+        if any(self.data.get(k) for k in ("items", "labels", "session_id", "last_answer", "links")):
             sc.save(self.sidecar_path, self.data)
 
 
@@ -166,7 +174,7 @@ def render(doc):
             continue
         if it["status"] != "open" and not show_resolved:
             continue
-        if not shown(it):
+        if not shown(doc, it):
             continue
         by_kind.setdefault(it["kind"], []).append(it)
 
@@ -304,6 +312,7 @@ def open_sidebar(doc):
     sheet = window.new_html_sheet("Margin: " + os.path.basename(doc.path),
                                   sidebar_html(doc), group=group)
     _sidebars[doc.view.id()] = sheet
+    doc.suggested = None
     window.focus_view(doc.view)
     return sheet
 
@@ -351,8 +360,12 @@ def prose_html(text):
     return "".join(out)
 
 
-SECTIONS = [("direction", "Direction"), ("structure", "Structure"), ("checklist", "Checklist"),
-            ("claude", "Changed by Claude"), ("answer", "Last answer")]
+SECTIONS = [("related", "Related"), ("direction", "Direction"), ("structure", "Structure"),
+            ("checklist", "Checklist"), ("claude", "Changed by Claude"), ("answer", "Last answer")]
+
+
+def k_tokens(n):
+    return "%.1fk" % (n / 1000.0) if n >= 1000 else str(n)
 
 
 def item_line(doc, it, actions):
@@ -376,37 +389,66 @@ def sidebar_html(doc):
     d = doc.data
     out = ["<style>%s</style>" % SIDEBAR_CSS]
 
-    rounds = [("mirror", "Mirror"), ("stock", "Stock"), ("ask", "Ask…"), ("react", "React…")]
+    rounds = [("mirror", "Mirror"), ("stock", "Stock"), ("ask", "Ask / react…")]
     if doc.path in _running:
         out.append('<div class="dim">Claude is reading…</div>')
     else:
         out.append('<div class="bar">%s</div>' % "".join(
             '<a href=\'%s\'>%s</a>' % (act(doc, "round", kind=k), name) for k, name in rounds))
 
+    ses = d.get("session") or {}
+    if d.get("session_id"):
+        tokens = ses.get("tokens_in")
+        out.append('<div class="dim">Conversation: %d round%s%s · <a href=\'%s\'>open in Terminal</a>'
+                   ' · <a href=\'%s\'>start new</a></div>' % (
+                       ses.get("rounds", 0), "" if ses.get("rounds") == 1 else "s",
+                       (" · last round read %s tokens" % k_tokens(tokens)) if tokens else "",
+                       act(doc, "terminal"), act(doc, "new_session")))
+
     # Section bar: click a name to show only that section, "all" for everything.
     out.append('<div class="bar nav">%s<a href=\'%s\'>all</a></div>' % (
         "".join("<a href='%s'>%s</a>" % (act(doc, "solo", section=k), name) for k, name in SECTIONS),
         act(doc, "solo", section="")))
 
-    # Legend: click a kind to hide or show it.
-    hidden = setting("hidden_kinds", [])
+    # Legend: click a kind to switch it off (Claude leaves it out too) or on.
+    off = off_kinds(doc)
+    by_claude = set(d.get("kinds_off", {})) - set(d.get("kinds_on", []))
     colors = setting("colors", {})
     legend = []
     for k in KIND_LETTERS:
-        if k in setting("skip_kinds", []):
-            continue
         style = "color: %s" % colors.get(k, "#888")
         label = "<b>%s</b> %s" % (KIND_LETTERS[k], KIND_NAMES[k])
-        if k in hidden:
-            style, label = "color: color(var(--foreground) alpha(0.35))", "<s>%s</s>" % label
+        if k in off:
+            style = "color: color(var(--foreground) alpha(0.35))"
+            label = "<s>%s</s>%s" % (label, " (Claude)" if k in by_claude else "")
         legend.append("<a href='%s' style='%s'>%s</a>" % (act(doc, "toggle_kind", kind=k), style, label))
     out.append('<div class="legend">%s</div>' % "&nbsp;&nbsp; ".join(legend))
+    for k in sorted(by_claude - set(setting("skip_kinds", []))):
+        reason = d["kinds_off"].get(k)
+        out.append('<div class="dim">Claude turned off <i>%s</i>%s. Click it to turn it back on.</div>' % (
+            KIND_NAMES.get(k, k), (": " + esc(reason)) if reason else ""))
 
     def section(key, title):
         closed = key in doc.collapsed
         out.append("<h2><a href='%s'>%s %s</a></h2>" % (
             act(doc, "collapse", section=key), "▸" if closed else "▾", title))
         return not closed
+
+    if section("related", "Related"):
+        for rel, path, mtime in linked_files(doc):
+            out.append('<div class="unit"><a href=\'%s\'>%s</a> <span class="dim">%s</span>'
+                       '&nbsp;&nbsp;<a class="dim" href=\'%s\'>unlink</a></div>' % (
+                           act(doc, "open_link", path=rel), esc(os.path.basename(rel)),
+                           esc(mtime if os.path.exists(path) else "missing"), act(doc, "unlink", path=rel)))
+        sugg = suggested_files(doc)
+        if sugg:
+            out.append('<div class="dim" style="margin-top: 0.3rem">Same text, not linked:</div>')
+        for rel, path, date in sugg:
+            out.append('<div class="unit"><a href=\'%s\'>%s</a> <span class="dim">%s</span>'
+                       '&nbsp;&nbsp;<a href=\'%s\'>link</a></div>' % (
+                           act(doc, "open_link", path=rel), esc(rel), esc(date or ""),
+                           act(doc, "link_this", path=rel)))
+        out.append("<div><a href='%s'>+ link a file…</a></div>" % act(doc, "link"))
 
     if section("direction", "Direction"):
         out.append('<div class="dir">%s</div>' % (esc(d.get("direction")) or
@@ -422,7 +464,7 @@ def sidebar_html(doc):
                            depth * 0.9, act(doc, "goto", line=u.start), esc(name), u.start + 1,
                            (" · " + esc(function)) if function else ""))
 
-    items = [it for it in d["items"] if it["status"] == "open" and shown(it)]
+    items = [it for it in d["items"] if it["status"] == "open" and shown(doc, it)]
     items.sort(key=lambda it: (WEIGHT_ORDER.get(it.get("weight"), 1),
                                (it["anchor"] or {}).get("line", 10 ** 9)))
     if section("checklist", "Checklist (%d open)" % len(items)):
@@ -436,26 +478,25 @@ def sidebar_html(doc):
 
     # Items Claude closed that the writer has not looked at yet.
     closed = [it for it in d["items"] if it.get("status_by") == "claude"
-              and it["status"] == "done" and not it.get("seen") and shown(it)]
+              and it["status"] == "done" and not it.get("seen") and shown(doc, it)]
     if closed and section("claude", "Changed by Claude (%d)" % len(closed)):
         for it in closed:
             out.append(item_line(doc, it, [
                 ("✓ fine", act(doc, "seen", item_id=it["id"])),
                 ("reopen", act(doc, "resolve", item_id=it["id"], status="open"))]))
 
-    last = None
-    for e in reversed(d["transcript"]):
-        if e["role"] in ("claude", "error"):
-            last = e
-            break
+    last = d.get("last_answer")
     if section("answer", "Last answer"):
-        if last is None:
+        if not last:
             out.append('<div class="dim">no rounds yet</div>')
         else:
-            out.append('<div class="dim">%s · %s · <a href=\'%s\'>whole conversation</a></div>' % (
-                ROUND_NAMES.get(last.get("kind"), ""), last["at"].replace("T", " ")[:16],
-                act(doc, "conversation")))
-            if last["role"] == "error":
+            out.append('<div class="dim">%s · %s%s</div>' % (
+                ROUND_NAMES.get(last.get("kind"), ""), (last.get("at") or "").replace("T", " ")[:16],
+                (" · <a href='%s'>conversation in Terminal</a>" % act(doc, "terminal"))
+                if d.get("session_id") else ""))
+            if last.get("question"):
+                out.append('<div class="dim"><i>%s</i></div>' % esc(last["question"]))
+            if last.get("error"):
                 out.append('<div class="answer"><b>Error:</b> %s</div>' % esc(last["text"]))
             else:
                 out.append('<div class="answer">%s</div>' % prose_html(last["text"]))
@@ -477,7 +518,8 @@ class MarginSidebarCommand(sublime_plugin.TextCommand):
 
 class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
     """Clicks in the sidebar."""
-    def run(self, view_id, action, line=None, item_id=None, status=None, kind=None, section=None):
+    def run(self, view_id, action, line=None, item_id=None, status=None, kind=None, section=None,
+            path=None):
         view = next((v for v in self.window.views() if v.id() == view_id), None)
         doc = view and doc_for(view, create=False)
         if not doc:
@@ -490,10 +532,7 @@ class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
             doc.collapsed = set(k for k, _ in SECTIONS if section and k != section)
             return update_sidebar(doc, repaint=True)
         if action == "toggle_kind":
-            hidden = set(setting("hidden_kinds", []))
-            hidden ^= {kind}
-            settings().set("hidden_kinds", sorted(hidden))
-            sublime.save_settings(SETTINGS)
+            toggle_kind(doc, kind)
             render_all()
             return update_sidebar(doc, repaint=True)
         if action == "seen":
@@ -504,13 +543,26 @@ class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
             return update_sidebar(doc, repaint=True)
         if action == "resolve":
             return resolve(view, item_id, status)
+        if action == "unlink":
+            set_link(doc.path, os.path.normpath(os.path.join(os.path.dirname(doc.path), path)), False)
+            return update_sidebar(doc, repaint=True)
+        if action == "link_this":
+            set_link(doc.path, os.path.normpath(os.path.join(os.path.dirname(doc.path), path)), True)
+            return update_sidebar(doc, repaint=True)
+        if action == "open_link":
+            target = os.path.normpath(os.path.join(os.path.dirname(doc.path), path))
+            return open_related(self.window, view, target)
+        if action == "new_session":
+            return view.run_command("margin_new_session")
         self.window.focus_view(view)
         if action == "goto":
             goto(view, line)
         elif action == "round":
             view.run_command("margin_" + kind)
-        elif action == "conversation":
-            show_panel(self.window, doc, last_only=False)
+        elif action == "terminal":
+            view.run_command("margin_open_terminal")
+        elif action == "link":
+            view.run_command("margin_link_file")
         elif action == "show":
             it = sc.find(doc.data, item_id)
             if it and it.get("anchor"):
@@ -518,6 +570,189 @@ class MarginSidebarActionCommand(sublime_plugin.WindowCommand):
                 on_navigate(view, "open:" + item_id)
         elif action == "apply":
             view.run_command("margin_apply_suggestion", {"item_id": item_id})
+
+
+def toggle_kind(doc, kind):
+    """Writer's switch. Off: for every document (skip_kinds). Turning on a kind
+    Claude turned off keeps it on for this document."""
+    writer_off = set(setting("skip_kinds", []))
+    if kind in writer_off:
+        writer_off.discard(kind)
+    elif kind in off_kinds(doc):
+        doc.data.setdefault("kinds_on", []).append(kind)
+        doc.data.get("kinds_off", {}).pop(kind, None)
+        doc.save()
+        return
+    else:
+        writer_off.add(kind)
+        if kind in doc.data.get("kinds_on", []):
+            doc.data["kinds_on"].remove(kind)
+            doc.save()
+    settings().set("skip_kinds", sorted(writer_off))
+    sublime.save_settings(SETTINGS)
+
+
+# --------------------------------------------------------------------------
+# Linked files (a sermon and its liturgies, say): stored both ways, as paths
+# relative to each document, in each document's sidecar.
+
+
+def linked_files(doc):
+    """(relative path, absolute path, date) for the links, newest first."""
+    out = []
+    base = os.path.dirname(doc.path)
+    for rel in doc.data.get("links", []):
+        path = os.path.normpath(os.path.join(base, rel))
+        out.append((rel, path, file_date(path)))
+    out.sort(key=lambda e: e[2] or "", reverse=True)
+    return out
+
+
+def file_date(path):
+    """A date in the file name (20261004, 2026-10-04), else the file's own date."""
+    m = re.search(r"(?<!\d)(\d{4})-?(\d{2})-?(\d{2})(?!\d)", os.path.basename(path))
+    if m and 1 <= int(m.group(2)) <= 12 and 1 <= int(m.group(3)) <= 31:
+        return "%s-%s-%s" % m.groups()
+    try:
+        return time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(path)))
+    except OSError:
+        return None
+
+
+def name_key(path):
+    """What links files by name, from the link_key pattern: for sermons the
+    Bible text, e.g. Joh02.1-12 -> ("joh", 2). Numbers lose leading zeros."""
+    pattern = setting("link_key")
+    if not pattern:
+        return None
+    m = re.search(pattern, os.path.basename(path))
+    if not m:
+        return None
+    return tuple(str(int(g)) if g.isdigit() else g.lower() for g in m.groups() if g is not None)
+
+
+def suggested_files(doc):
+    """Files near the document with the same name key, not linked yet, newest first.
+    Only suggestions: several versions and liturgies may fit, the writer links."""
+    if doc.suggested is None:
+        key = name_key(doc.path)
+        doc.suggested = [] if key is None else [
+            f for f in link_candidates(doc) if name_key(f) == key]
+    base = os.path.dirname(doc.path)
+    linked = set(os.path.normpath(os.path.join(base, rel)) for rel in doc.data.get("links", []))
+    out = [(os.path.relpath(f, base), f, file_date(f)) for f in doc.suggested if f not in linked]
+    out.sort(key=lambda e: e[2] or "", reverse=True)
+    return out
+
+
+def set_link(a, b, on=True):
+    """Link (or unlink) files a and b, in both sidecars."""
+    for this, other in ((a, b), (b, a)):
+        open_doc = next((d for d in _docs.values() if d.path == this), None)
+        if open_doc is not None:
+            data, side = open_doc.data, open_doc.sidecar_path
+        else:
+            side = sc.path_for(this, setting("sidecar_suffix", ".margin.json"))
+            data = sc.load(side, this)
+        rel = os.path.relpath(other, os.path.dirname(this))
+        links = [l for l in data.get("links", []) if l != rel]
+        if on:
+            links.append(rel)
+        data["links"] = links
+        if open_doc is not None:
+            open_doc.save()
+        elif links or os.path.exists(side):
+            sc.save(side, data)
+
+
+def open_related(window, view, path):
+    if not os.path.exists(path):
+        sublime.status_message("Margin: %s not found." % path)
+        return
+    if os.path.splitext(path)[1].lower() in setting("link_open_in_sublime", [".tex", ".md", ".txt"]):
+        window.focus_group(window.get_view_index(view)[0])
+        window.open_file(path)
+    elif sublime.platform() == "osx":
+        subprocess.Popen(["open", path])
+    else:
+        sublime.status_message("Margin: open %s with its own program." % path)
+
+
+def link_candidates(doc, limit=400):
+    """Files near the document, newest first: its folder and the folder
+    above it, each with their subfolders (one level)."""
+    here = os.path.dirname(doc.path)
+    up = os.path.dirname(here)
+    exts = tuple(setting("link_extensions", [".tex", ".md", ".txt", ".docx", ".pdf"]))
+    suffix = setting("sidecar_suffix", ".margin.json")
+    seen, out = set(), []
+    for top, depth in ((here, 1), (up, 1)):
+        try:
+            names = os.listdir(top)
+        except OSError:
+            continue
+        for name in names:
+            p = os.path.join(top, name)
+            if os.path.isdir(p) and depth and not name.startswith("."):
+                try:
+                    sub = [os.path.join(p, n) for n in os.listdir(p)]
+                except OSError:
+                    sub = []
+                files = sub
+            else:
+                files = [p]
+            for f in files:
+                if (f in seen or f == doc.path or not f.lower().endswith(exts)
+                        or f.endswith(suffix) or not os.path.isfile(f)):
+                    continue
+                seen.add(f)
+                out.append((os.path.getmtime(f), f))
+    out.sort(reverse=True)
+    return [f for _, f in out[:limit]]
+
+
+class MarginLinkFileCommand(sublime_plugin.TextCommand):
+    """Link a related file (e.g. the liturgy for this sermon); it shows in the
+    sidebar of both documents."""
+    def run(self, edit):
+        doc = require_doc(self.view)
+        if not doc:
+            return
+        files = link_candidates(doc)
+        if not files:
+            sublime.status_message("Margin: no files found near this document.")
+            return
+        here = os.path.dirname(doc.path)
+        items = [sublime.QuickPanelItem(os.path.basename(f), "",
+                                        os.path.relpath(os.path.dirname(f), here)) for f in files]
+
+        def chosen(i):
+            if i >= 0:
+                set_link(doc.path, files[i], True)
+                update_sidebar(doc, repaint=True)
+        self.view.window().show_quick_panel(items, chosen, placeholder="Link a file (newest first)")
+
+
+def follow_sidebar(view):
+    """One sidebar per window: it shows whichever document is active."""
+    window = view.window()
+    if window is None or not view.file_name():
+        return
+    for vid, sheet in list(_sidebars.items()):
+        w = sheet.window()
+        if w is None or w.id() != window.id() or vid == view.id():
+            continue
+        doc = doc_for(view)
+        if not doc:
+            return
+        _sidebars.pop(vid, None)
+        _sidebar_last.pop(vid, None)
+        _sidebars[view.id()] = sheet
+        sheet.set_name("Margin: " + os.path.basename(doc.path))
+        doc.suggested = None  # look again for new files
+        doc.refresh()
+        update_sidebar(doc, repaint=True)
+        return
 
 
 def render_all():
@@ -547,7 +782,7 @@ def start_round(view, kind, question=None, selection=None):
             selection=selection, question=question,
             override_dir=settings().get("prompt_dir"),
             response_language=settings().get("response_language"),
-            skip_kinds=setting("skip_kinds", []))
+            skip_kinds=sorted(off_kinds(doc)), doc_path=doc.path)
     except Exception as e:
         sublime.error_message("Margin: could not build prompt: %s" % e)
         return
@@ -557,15 +792,19 @@ def start_round(view, kind, question=None, selection=None):
     update_sidebar(doc)
     spinner(view, doc.path, ROUND_NAMES[kind], 0)
     round_no = sc.next_round(doc.data)
-    doc.data["transcript"].append({"role": "user", "kind": kind, "at": sc.now(),
-                                   "text": question or ROUND_NAMES[kind]})
+
+    rs = runner_settings()
+    if kind == "ask":
+        # The document is not in an Ask prompt; Claude reads it if it needs to.
+        rs["claude_tools"] = list(rs.get("claude_tools") or []) + ["Read"]
+    info = {}
 
     def work():
         try:
             result, sid = claude_runner.run(
-                runner_settings(), system, user,
+                rs, system, user,
                 session_id=doc.data.get("session_id"),
-                cwd=os.path.dirname(doc.path))
+                cwd=os.path.dirname(doc.path), info=info)
             err = None
         except Exception as e:  # ClaudeError or anything unexpected
             result, sid, err = None, None, str(e)
@@ -574,7 +813,8 @@ def start_round(view, kind, question=None, selection=None):
     def finish(result, sid, err):
         _running.discard(doc.path)
         if err:
-            doc.data["transcript"].append({"role": "error", "kind": kind, "at": sc.now(), "text": err})
+            doc.data["last_answer"] = {"kind": kind, "at": sc.now(), "question": question,
+                                       "text": err, "error": True}
             doc.save()
             update_sidebar(doc, repaint=True)
             if sidebar_for(doc) is None:
@@ -583,15 +823,23 @@ def start_round(view, kind, question=None, selection=None):
                 "sidebar" if sidebar_for(doc) else "panel"))
             return
         doc.data["session_id"] = sid
+        ses = {} if info.get("new_session") else dict(doc.data.get("session") or {})
+        u = info.get("usage") or {}
+        ses["rounds"] = ses.get("rounds", 0) + 1
+        ses["tokens_in"] = sum(u.get(k) or 0 for k in (
+            "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+        ses["tokens_out"] = u.get("output_tokens") or 0
+        doc.data["session"] = ses
         prose, payload = protocol.parse_response(result)
         # Anchor to the text Claude read, then move the anchors to wherever
         # those lines are now, in case the writer kept writing meanwhile.
         added = protocol.apply_payload(doc.data, sent_lines, payload, round_no, kind,
-                                       setting("skip_kinds", []))
+                                       off_kinds(doc))
         updated = sc.apply_updates(doc.data, payload.get("updates"))
+        sc.apply_kinds_off(doc.data, payload.get("kinds_off"))
         doc.refresh()
-        doc.data["transcript"].append({"role": "claude", "kind": kind, "at": sc.now(),
-                                       "text": prose, "items": [a["id"] for a in added]})
+        doc.data["last_answer"] = {"kind": kind, "at": sc.now(), "question": question,
+                                   "text": prose, "error": False}
         doc.save()
         doc.visible = True
         render(doc)
@@ -613,32 +861,27 @@ def spinner(view, path, label, i):
     sublime.set_timeout(lambda: spinner(view, path, label, i + 1), 120)
 
 
-def transcript_text(doc, last_only=False):
-    entries = doc.data["transcript"]
-    if last_only:
-        # last user entry and everything after it
-        idx = max([i for i, e in enumerate(entries) if e["role"] == "user"] or [0])
-        entries = entries[idx:]
+def answer_text(doc):
+    last = doc.data.get("last_answer") or {}
     out = []
-    for e in entries:
-        if e["role"] == "user":
-            out.append("## %s  (%s)\n" % (e["text"], e["at"]))
-        elif e["role"] == "error":
-            out.append("**Error:** %s\n" % e["text"])
-        else:
-            out.append(e["text"].strip() + "\n")
+    if last:
+        out.append("## %s  (%s)\n" % (last.get("question") or ROUND_NAMES.get(last.get("kind"), ""),
+                                       last.get("at")))
+        out.append(("**Error:** %s\n" if last.get("error") else "%s\n") % last.get("text", "").strip())
     if doc.data.get("direction"):
         out.append("\n---\n*Direction:* %s\n" % doc.data["direction"])
-    return "\n".join(out)
+    if doc.data.get("session_id"):
+        out.append("\n*Whole conversation:* Margin: Open conversation in Terminal\n")
+    return "\n".join(out) or "No rounds yet."
 
 
-def show_panel(window, doc, last_only=True):
+def show_panel(window, doc):
     panel = window.create_output_panel(PANEL)
     panel.assign_syntax("Packages/Markdown/Markdown.sublime-syntax")
     panel.settings().set("word_wrap", True)
     panel.settings().set("line_numbers", False)
     panel.settings().set("gutter", False)
-    panel.run_command("append", {"characters": transcript_text(doc, last_only)})
+    panel.run_command("append", {"characters": answer_text(doc)})
     panel.set_read_only(True)
     window.run_command("show_panel", {"panel": "output." + PANEL})
 
@@ -675,18 +918,11 @@ class MarginAskCommand(sublime_plugin.TextCommand):
             first = self.view.rowcol(self.view.sel()[0].begin())[0] + 1
             last = self.view.rowcol(self.view.sel()[-1].end())[0] + 1
             sel = "r.%d-%d:\n%s" % (first, last, sel)
-        caption = "Ask Claude about the selection:" if sel else "Ask Claude:"
+        caption = ("Ask Claude about the selection, or react:" if sel
+                   else "Ask Claude, or react to the last round:")
         self.view.window().show_input_panel(
             caption, "", lambda q: q.strip() and start_round(self.view, "ask", q.strip(), sel),
             None, None)
-
-
-class MarginReactCommand(sublime_plugin.TextCommand):
-    """A general reaction to the last round; Claude re-weighs the open items."""
-    def run(self, edit):
-        self.view.window().show_input_panel(
-            "Your reaction to Claude's last round (Claude will re-weigh the open items):", "",
-            lambda q: q.strip() and start_round(self.view, "react", q.strip()), None, None)
 
 
 class MarginToggleCommand(sublime_plugin.TextCommand):
@@ -699,10 +935,28 @@ class MarginToggleCommand(sublime_plugin.TextCommand):
 
 
 class MarginShowAnswerCommand(sublime_plugin.WindowCommand):
-    def run(self, full=False):
+    def run(self):
         doc = require_doc(self.window.active_view())
         if doc:
-            show_panel(self.window, doc, last_only=not full)
+            show_panel(self.window, doc)
+
+
+class MarginOpenTerminalCommand(sublime_plugin.TextCommand):
+    """The whole conversation: this document's Claude session, in Terminal."""
+    def run(self, edit):
+        doc = require_doc(self.view)
+        if not doc or not doc.data.get("session_id"):
+            sublime.status_message("Margin: no Claude conversation yet for this document.")
+            return
+        claude = (setting("claude_command", ["claude"]) or ["claude"])[0]
+        cmd = "cd %s && %s --resume %s" % (shlex.quote(os.path.dirname(doc.path)),
+                                          shlex.quote(claude), shlex.quote(doc.data["session_id"]))
+        if sublime.platform() == "osx":
+            script = 'tell application "Terminal" to do script "%s"' % cmd.replace("\\", "\\\\").replace('"', '\\"')
+            subprocess.Popen(["osascript", "-e", script, "-e", 'tell application "Terminal" to activate'])
+        else:
+            sublime.set_clipboard(cmd)
+            sublime.status_message("Margin: command copied; paste it in a terminal.")
 
 
 class MarginOutlineCommand(sublime_plugin.TextCommand):
@@ -813,7 +1067,7 @@ class MarginChecklistCommand(sublime_plugin.TextCommand):
         doc.refresh()
         items = [it for it in doc.data["items"]
                  if (kind is None or it["kind"] == kind) and (status == "all" or it["status"] == status)
-                 and shown(it)]
+                 and shown(doc, it)]
         items.sort(key=lambda it: (it["anchor"] or {}).get("line", 10 ** 9))
         if not items:
             sublime.status_message("Margin: checklist is empty.")
@@ -913,7 +1167,9 @@ class MarginNewSessionCommand(sublime_plugin.TextCommand):
                 "Start a new Claude conversation for this document?\n"
                 "Checklist, labels and decisions stay.", "New conversation"):
             doc.data["session_id"] = None
+            doc.data["session"] = {}
             doc.save()
+            update_sidebar(doc, repaint=True)
 
 
 # --------------------------------------------------------------------------
@@ -927,6 +1183,7 @@ class MarginEvents(sublime_plugin.EventListener):
     def on_activated_async(self, view):
         if view.id() not in _docs:
             self._maybe_show(view)
+        follow_sidebar(view)
 
     def _maybe_show(self, view):
         path = view.file_name()
@@ -957,7 +1214,13 @@ class MarginEvents(sublime_plugin.EventListener):
 
     def on_close(self, view):
         _docs.pop(view.id(), None)
-        close_sidebar(view.id())
+        # Keep the window's sidebar: hand it to whichever document is active next.
+        sheet = _sidebars.pop(view.id(), None)
+        _sidebar_last.pop(view.id(), None)
+        if sheet is not None and sheet.window() is not None:
+            window = sheet.window()
+            _sidebars[-window.id()] = sheet
+            sublime.set_timeout(lambda: window.active_view() and follow_sidebar(window.active_view()), 50)
 
     def on_hover(self, view, point, zone):
         doc = doc_for(view, create=False)
@@ -966,7 +1229,7 @@ class MarginEvents(sublime_plugin.EventListener):
         row = view.rowcol(point)[0]
         hits = [it for it in doc.data["items"]
                 if it.get("anchor") and not it["anchor"].get("lost")
-                and (it["status"] == "open" or setting("show_resolved", False)) and shown(it)
+                and (it["status"] == "open" or setting("show_resolved", False)) and shown(doc, it)
                 and it["anchor"]["line"] <= row <= it["anchor"].get("end_line", it["anchor"]["line"])]
         if hits:
             body = "<hr>".join(item_html(h)[len("<body id='margin'>"):-len("</body>")] for h in hits)
