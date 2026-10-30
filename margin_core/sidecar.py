@@ -181,10 +181,12 @@ def apply_updates(data, updates):
         own = it["status"] == "open" or it.get("status_by") == "claude"
         if not own:
             continue
+        # An item the writer reopened stays open; Claude may only re-weigh it.
+        reopened = it["status"] == "open" and it.get("status_by") == "user"
         note = (up.get("reason") or "").strip() or None
         if up.get("weight") in WEIGHTS:
             it["weight"] = up["weight"]
-        if up.get("status") in ("open", "done"):
+        if up.get("status") in ("open", "done") and not reopened:
             set_status(data, it["id"], up["status"], by="claude")
             it["seen"] = False
         if note:
