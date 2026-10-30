@@ -44,6 +44,7 @@ All commands are in the Command Palette under **Margin:**.
 | **Stock** | Inventory of material not (yet) in the draft: your marked notes and loose fragments, plus what Claude would add from the sources, each with where it could land. |
 | **Ask Claude…** | A question during writing, about the selection if there is one. Also in the right-click menu. |
 | **Show/hide sidebar** | A sheet next to the document with the direction, the structure (click to jump), the open checklist with ✓ / ✗, and Claude's last answer. While it is open, answers go there instead of the bottom panel. |
+| **React to the last round…** | A general reaction ("the exegetical detail matters less to me here"). Claude interprets it and re-weighs the open items: lower or higher weight, or closed with a reason. What you accepted or rejected is never changed. Items Claude closed appear under *Changed by Claude* in the sidebar until you mark them fine or reopen them. |
 | **Checklist** | All open items in line order. Pick one to jump there, then accept, reject (with reason), mark done, reopen, or apply a suggestion. |
 | **Outline / Go to unit** | Jump through sections, moves and labelled paragraphs. |
 | **Label this unit…** | Your own name for the unit at the cursor. Your labels always win over Claude's. |
@@ -51,6 +52,8 @@ All commands are in the Command Palette under **Margin:**.
 | **Language round** | Spelling and typos, once, at the end. Each finding is an applicable suggestion; **Apply all language suggestions** does them in one go (undo works). A suggestion is refused if its line changed in the meantime. |
 | **Show last answer / whole conversation** | Claude's prose in a panel. |
 | **New Claude conversation** | Starts a fresh Claude session; checklist, labels and decisions stay. |
+
+In every round, the open items go to Claude with their ids, so the list works both ways: Claude can re-weigh or close its own points when the text changes, and you decide with ✓ (agree: the point stands, you will do or did it), ✗ (not this, with a reason Claude respects) or *done* (handled in the text).
 
 In the margin, every item shows a letter for its kind (**S**tructure, **D**irection, **F**act, stock **V**, **O**ption, **?** question, **L**anguage, **N**ote) followed by its title, plus ✓ and ✗ to accept or reject. Click the title, or hover the gutter dot, for the explanation and references.
 

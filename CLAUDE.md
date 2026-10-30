@@ -30,5 +30,7 @@ Sublime Text 4 plugin: structure view + Claude Code as a sparring partner that r
 ## Open / next
 
 - **Sidebar (decided, first version built):** HTML sheet in a second column (`margin_sidebar`) with direction, clickable structure, open checklist with ✓/✗/done/apply, and Claude's *last* answer; the whole conversation stays in the bottom panel / Terminal. Inline annotations stay too (`inline_annotations` setting turns them off). Links are `subl:margin_sidebar_action {...}`. Not yet tried in real Sublime.
+- **Shared checklist:** open items go to Claude with ids; Claude answers `updates` (weight high/normal/low, status done/open, reason) that Margin applies via `sidecar.apply_updates`, never on items the writer decided. React round (`prompts/react.md`) is for general reactions. Claude does not edit the sidecar file itself (avoids write races with Sublime).
+- Sidebar: legend toggles `hidden_kinds` (view only); `skip_kinds` also tells Claude to leave kinds out. Sections fold; a section bar shows one section at a time (minihtml has no hover or in-page anchors).
 - Command to open the document's session in Terminal (`cd <doc dir> && claude --resume <session_id>`).
 - Real end-to-end test with Claude on the user's Mac (not possible in the build container).
