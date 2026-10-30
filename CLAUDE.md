@@ -12,9 +12,13 @@ Sublime Text 4 plugin: structure view + Claude Code as a sparring partner that r
 - Pre-writing exegetical sparring stays in Claude chat, not in the plugin. The plugin is for joining mid-process.
 - The document is never modified except when applying a language suggestion. All state lives in a sidecar `<doc>.margin.json` so PDF/pandoc/Jekyll pipelines are untouched.
 
+## Working agreement
+
+- **Small code, tested live.** No test suites, no scripts that test scripts: the user tests in Sublime, in real use. Don't add tests unless asked; it wastes tokens.
+
 ## Architecture
 
-- `margin_core/` — no `sublime` imports, tested with `python3 -m pytest tests`.
+- `margin_core/` — no `sublime` imports. The existing tests (`python3 -m pytest tests`) may be run, but are not extended (see below).
   - `structure.py` rule-based parsing (profiles: regex per line, levels, separators, paragraphs, implicit *opening*).
   - `notes.py` writer's stock: `%>` lines, `\begin{notes}`, text after `\end{document}`.
   - `sidecar.py` items/labels/transcript/session id; anchors relocate after edits (`orig` text guards suggestions).
